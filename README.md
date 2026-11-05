@@ -1,85 +1,151 @@
 # Prompt Classification for Pi
 
-Chess.com Game Review-inspired badges for your prompts. After Pi finishes responding, a colored badge appears in the transcript:
+Chess.com Game Review-inspired feedback for your prompts, plus a full-session scorecard. Reviews appear **after Pi finishes responding**, including tool calls and automatic retries.
 
 ```text
- ✓  Excellent · Prompt review
-Clear target and boundaries; easy to act on.
+ ?!  Inaccuracy · Local review
+Specify Georgia the country or the U.S. state.
 ```
 
-Ratings now use **local, deterministic writing heuristics** instead of randomness. Each badge comes with one brief observation or suggestion. Greetings get **Book**, vague requests like “fix it” get **Inaccuracy**, and requests with concrete targets, constraints, examples, and verification can earn **Great** or **Brilliant**. Concise questions are not penalized just for being short.
-
-All ten classifications are active:
-
-| Classification | Heuristic trigger |
-| --- | --- |
-| **Brilliant** `!!` | Target, constraints, context, verification, plus reproduction steps or a code example |
-| **Great** `!` | Target and constraints, plus context or verification |
-| **Best** `★` | Target, constraints, supporting context, and verification |
-| **Excellent** `✓` | Concrete target and constraints |
-| **Good** `✓` | Direct question, follow-up, or recognizable request |
-| **Book** `▤` | Greeting or thanks |
-| **Inaccuracy** `?!` | Vague target or unclear request |
-| **Mistake** `?` | Conflicting length requirements |
-| **Miss** `✕` | Context without a task, or empty input |
-| **Blunder** `??` | Incompatible exclusive formats, e.g. “return only JSON and return only XML” |
-
-This is a lightweight prompt-writing aid, not a model-based evaluation: it matches English words and patterns, cannot understand the full conversation, and may misclassify prompts (including quoted examples of conflicting instructions). Ratings are feedback, not safety gates.
-
-The badges recreate the familiar symbols and approximate colors using terminal text and colored backgrounds (teal `!!`, blue `!`, green star/check, yellow `?!`, orange `?`, red `??`). They are not Chess.com's original image assets, and this extension is not affiliated with Chess.com. Book uses a terminal-friendly book symbol.
+**Local by default. Context-aware. Optional AI review. No runtime dependencies beyond Pi.**
 
 ## Quick start
 
 Requires [Pi](https://pi.dev) with the `@earendil-works` extension APIs (tested with Pi 1.5.0).
 
-Clone this repository, then run from its root:
+From this repository's root, try it for one session:
 
 ```sh
 pi -e ./index.ts
 ```
 
-Submit a prompt normally. The badge appears **after the full response finishes**, including tool calls, retries, and automatic continuations.
-
-To keep it enabled across sessions, install the local package from the repository root:
+Or install the local package persistently:
 
 ```sh
 pi install .
 ```
 
-Then use `/reload` in Pi (or restart Pi). No npm install or extra runtime dependencies are needed; Pi supplies the TUI APIs. Merely opening this directory does not enable the extension.
+Restart Pi or use `/reload` after installing/updating. Merely opening this directory does not enable the extension.
 
-## Behavior
+## Commands
 
-- Interactive terminal mode only; no output or review entries in RPC, JSON, or print mode.
-- One rating per delivered user message. If you queue follow-ups or steering messages, their ratings appear together after all work settles, in prompt order.
-- Aborted runs and runs whose final assistant message is an error are not rated.
-- Slash commands handled without an agent response are not rated.
-- Ratings persist in the session and render again when it is resumed with the extension enabled.
-- No model calls, network requests, or additional token costs. Prompt text is analyzed locally when delivered; only the derived classification, short feedback, and timestamp are stored in review entries (not a duplicate of the prompt).
-- Historical random ratings keep their original badge and show a legacy note rather than invented feedback.
-- Review entries are display-only and do not enter model context.
+| Command | Behavior |
+| --- | --- |
+| `/prompt-review` or `/prompt-review status` | Show current settings |
+| `/prompt-review on` | Enable automatic feedback |
+| `/prompt-review off` | Disable automatic feedback (manual full reviews still work) |
+| `/prompt-review compact` | Put the badge and feedback on one logical line |
+| `/prompt-review expanded` | Put feedback below the badge (default) |
+| `/prompt-review mode local` | Free, deterministic local heuristics (default) |
+| `/prompt-review mode ai` | Opt into model-based feedback, after confirmation |
+| `/prompt-review full` | Review every prompt on the current branch using the selected mode |
+| `/prompt-review full local` | Full review without model calls, regardless of selected mode |
+| `/prompt-review full ai` | Full AI review, with a separate cost confirmation |
+| `/prompt-review cancel` | Cancel any pending review |
 
-## Files
+Settings are saved **per session branch**, survive `/reload` and resume, and revert appropriately when you navigate the session tree. AI opt-in persists with those settings. Compact mode may wrap on narrow terminals. Expanding a badge reveals any AI fallback reason.
 
-- `index.ts`: badge definitions, lifecycle hooks, transcript renderer.
-- `classify.ts`: deterministic prompt classification and one-sentence feedback.
-- `tests/extension.test.mjs`: lifecycle and rendering tests using Node's test runner and Pi's real TUI components.
+## How prompts are rated
 
-## Tests
+The rubric rewards **clarity and sufficiency for the task**, not length, politeness, perfect spelling, or fancy formatting. All ten classifications are active:
 
-With the peer packages available locally (Node 22.18+):
+| Classification | Points | Meaning |
+| --- | ---: | --- |
+| **Brilliant** `!!` | 100 | Especially effective framing or insight |
+| **Great** `!` | 95 | Clear, actionable, and thoughtfully scoped |
+| **Best** `★` | 90 | Fully sufficient for the task; nothing important missing |
+| **Excellent** `✓` | 85 | Strong request with a minor opportunity to improve |
+| **Good** `✓` | 75 | Understandable and workable |
+| **Book** `▤` | — | Routine greeting or acknowledgment; unscored |
+| **Inaccuracy** `?!` | 55 | Small ambiguity |
+| **Mistake** `?` | 35 | Missing information likely to cause the wrong result |
+| **Miss** `✕` | 20 | Key question or objective omitted |
+| **Blunder** `??` | 0 | Fundamentally conflicting requirements |
+
+Every review offers one short observation or smallest useful improvement, capped at 12 words for new reviews.
+
+### Local mode
+
+Local rules use the prompt plus up to four preceding user/assistant messages. For example:
+
+- “hi” → **Book**; greetings do not lower your session score.
+- “Why is the sky blue?” → **Best**; a concise question can be sufficient.
+- “What's the capital of Georgia?” → **Inaccuracy**, unless the country/state is specified in the prompt or recent discussion.
+- “fix it” → **Good** after discussing a concrete bug, otherwise **Inaccuracy**.
+- “Translate this” with no source text or context → **Mistake**.
+- Mutually exclusive JSON-only and XML-only instructions → **Blunder**.
+
+This remains an **English pattern-based aid**, not semantic understanding. It can miss ambiguity, misread negation/quotes, or overvalue keywords. Coding-oriented patterns are more developed than other domains. AI mode uses the same rubric with richer interpretation, but its judgments can also be wrong or vary between calls.
+
+### AI mode
+
+AI reviews use **your currently selected Pi model**, through Pi's configured provider/authentication. Enabling it requires confirmation because each delivered prompt can add **one extra model call and token cost**. Full AI reviews separately confirm the maximum number of calls before starting.
+
+- Only prompt text, an image-attachment indicator, and bounded preceding user/assistant text are sent.
+- No tool output, thinking blocks, system instructions from your session, or image bytes are sent. The reviewer has no tools.
+- Prior context is limited to four messages, at most 1,500 characters each. The current prompt is limited to 6,000 characters; truncated prompts are marked `[prompt excerpt]`. Local mode still examines the full current prompt.
+- A 15-second deadline and 1,024 output-token cap bound each call. Provider billing may still apply to timed-out or cancelled requests.
+- Invalid JSON, provider errors, or unavailable model/authentication fall back to local review, visibly labeled **Local fallback**.
+- New prompts, new agent runs, session/branch changes, and `/prompt-review cancel` invalidate in-flight reviews so stale results are not appended.
+- Completed-response usage is saved with review entries. Full reports show recorded review usage, but **these calls are not included in Pi's main session token/cost totals**. Usage for failed/cancelled calls may be unavailable.
+
+AI mode sends conversation excerpts to the selected model's provider. Do not enable it for sensitive material unless that is appropriate for your provider and privacy requirements. Prompt-injection instructions in conversation data are treated as untrusted, but no model-based evaluator is infallible.
+
+## Full-session review
+
+Run this once Pi is idle:
+
+```text
+/prompt-review full
+```
+
+The scorecard includes:
+
+- A **score out of 100** and classification distribution.
+- Counts of reviewed/scored prompts and unscored Book messages.
+- Brief takeaways highlighting strong requests and improvement opportunities.
+- A numbered classification and brief feedback for **every user prompt** in the active branch, in conversation order.
+- Source counts: local, AI, and local fallback.
+
+**Formula:** the rounded arithmetic mean of the points in the table above, excluding Book. For example, Best (90), Inaccuracy (55), and Book yield **73/100**. Empty sessions and Book-only sessions are **unscored**, not 0/100.
+
+This is a coaching score, not an objective measure of intelligence or model performance. It is recomputed from the original prompts and preceding context, not averaged from historical badge entries. This means it also covers prompts from before installation, prompts submitted with automatic feedback off, and aborted/failed task prompts.
+
+“Full session” means **all user messages on the current branch**, including pre-compaction history retained in the session file. Abandoned branches, slash commands handled without a user message, tool results, and extension-authored custom messages are excluded. User-role messages inserted by other extensions cannot be distinguished from human prompts and are included. Each prompt is evaluated with preceding context, never later answers. Long sessions can take time; cancel to stop rather than publish a partial scorecard.
+
+## Display and persistence
+
+- Interactive terminal mode only; no review entries or model calls in RPC, print, or JSON modes.
+- Automatic badges appear once per delivered user prompt after the agent fully settles. Queued follow-ups receive their badges together, in order.
+- Aborted runs and runs ending in an assistant error do not receive automatic badges.
+- Badges and scorecards are display-only custom entries; they do not enter model context or trigger more agent turns.
+- Entries store derived feedback, source, prompt IDs/timestamps, and available usage—not duplicate prompt text. Original prompts already exist in Pi's session history. AI feedback may quote a small part of a prompt.
+- Historical random/older ratings still render; no feedback is invented for them.
+
+The symbols and approximate colors are terminal-friendly recreations, not Chess.com's original image assets. This project is not affiliated with Chess.com.
+
+## Development
+
+Files:
+
+- `index.ts`: Pi lifecycle hooks, commands, settings, and transcript renderers.
+- `classify.ts`: shared rubric, badge metadata, scoring points, and local evaluator.
+- `ai-review.ts`: bounded model calls, JSON validation, sanitization, and local fallback.
+- `session-review.ts`: branch prompt extraction and score aggregation.
+- `tests/fixtures.json`: realistic prompt/context benchmark, covering all ten labels.
+- `tests/extension.test.mjs`: benchmark, lifecycle, commands, scoring, mocked AI, cancellation, and real TUI rendering tests.
+
+Tests require Node 22.18+ with TypeScript stripping and module hooks. With the peer packages installed locally:
 
 ```sh
 npm install
 npm test
 ```
 
-Installing npm dependencies is only needed for standalone development, not for running the extension inside Pi.
-
-Or use the packages bundled in your Pi installation, without installing dependencies:
+Or use the dependencies already bundled in Pi without installing anything:
 
 ```sh
 PI_RUNTIME_ROOT="$HOME/.pi/agent/install/releases/1.5.0" npm test
 ```
 
-`PI_RUNTIME_ROOT` is the directory containing Pi's `node_modules`; adjust it for your installed version. Tests require Node 22.18+ with TypeScript stripping and module hooks support.
+Adjust the release path for your Pi installation. Tests use mocked model responses, make no network calls, and incur no model charges. A real provider/interactive terminal smoke test remains useful before relying on AI mode.
